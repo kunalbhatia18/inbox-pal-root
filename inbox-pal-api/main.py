@@ -6,6 +6,9 @@ import os
 import logging
 from dotenv import load_dotenv
 from pydantic import BaseModel
+import json
+from fastapi.responses import RedirectResponse
+import gmail_service
 
 
 # Set up logging
@@ -37,6 +40,19 @@ app.add_middleware(
 
 class TextCommand(BaseModel):
     text: str
+
+# Add these models
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+    
+class GmailCredentials(BaseModel):
+    token: str
+    refresh_token: str
+    token_uri: str
+    client_id: str
+    client_secret: str
+    scopes: list
 
 @app.post("/api/process-text")
 async def process_text(command: TextCommand):
@@ -111,6 +127,62 @@ async def transcribe_audio(file: UploadFile = File(...)):
         logger.error(f"Error in transcribe_audio: {str(e)}")
         if os.path.exists(file_location):
             os.remove(file_location)
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# Add these routes after your existing routes
+@app.get("/api/auth/login")
+async def login():
+    """Start the OAuth process by redirecting to Google's auth page."""
+    try:
+        auth_url = gmail_service.get_authorization_url()
+        return {"auth_url": auth_url}
+    except Exception as e:
+        logger.error(f"Error getting auth URL: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/auth/callback")
+async def auth_callback(code: str):
+    """Handle the OAuth callback and exchange code for token."""
+    try:
+        credentials = gmail_service.exchange_code_for_token(code)
+        
+        # Convert credentials to dict for storage
+        creds_dict = {
+            "token": credentials.token,
+            "refresh_token": credentials.refresh_token,
+            "token_uri": credentials.token_uri,
+            "client_id": credentials.client_id,
+            "client_secret": credentials.client_secret,
+            "scopes": credentials.scopes
+        }
+        
+        # In a real app, you would store these credentials securely
+        # For now, we'll just redirect to the frontend with a success message
+        return RedirectResponse(url=f"http://localhost:5173/auth/success?token={credentials.token}")
+    except Exception as e:
+        logger.error(f"Auth callback error: {str(e)}")
+        return RedirectResponse(url=f"http://localhost:5173/auth/error?message={str(e)}")
+
+@app.post("/api/gmail/unread")
+async def get_unread_emails(credentials: GmailCredentials):
+    """Get the count of unread emails."""
+    try:
+        service = gmail_service.build_gmail_service(credentials.dict())
+        result = gmail_service.get_unread_count(service)
+        return result
+    except Exception as e:
+        logger.error(f"Error getting unread emails: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/gmail/recent")
+async def get_recent_emails(credentials: GmailCredentials):
+    """Get recent emails with metadata."""
+    try:
+        service = gmail_service.build_gmail_service(credentials.dict())
+        emails = gmail_service.get_recent_emails(service)
+        return {"emails": emails}
+    except Exception as e:
+        logger.error(f"Error getting recent emails: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/health")

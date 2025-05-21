@@ -45,3 +45,5 @@ __pycache__/
 
 # Other system files
 .fseventsd
+
+inbox-pal-api/oauth_credentials.json
