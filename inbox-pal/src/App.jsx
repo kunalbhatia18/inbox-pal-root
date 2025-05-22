@@ -12,7 +12,7 @@ function Home() {
     isRecording, 
     isProcessing,
     transcript, 
-    error, 
+    error: recordingError, 
     toggleRecording,
     processText
   } = useAudioRecorder();
@@ -20,22 +20,31 @@ function Home() {
   const [inputText, setInputText] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [emailStats, setEmailStats] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
   const navigate = useNavigate();
   
   // Check authentication status
+  // Inside the Home component useEffect in App.jsx
   useEffect(() => {
     const checkAuth = async () => {
+      setIsLoading(true);
       const loggedIn = authService.isLoggedIn();
       setIsAuthenticated(loggedIn);
       
       if (loggedIn) {
         try {
-          // Fetch email stats
+          // Just fetch the data with the token-based approach
           const unreadData = await gmailService.getUnreadCount();
           setEmailStats(unreadData);
+          setIsLoading(false);
         } catch (err) {
           console.error('Error fetching email data:', err);
+          setError(`Failed to load email data: ${err.message}`);
+          setIsLoading(false);
         }
+      } else {
+        setIsLoading(false);
       }
     };
     
@@ -44,6 +53,12 @@ function Home() {
   
   const handleLogin = () => {
     authService.initiateLogin();
+  };
+  
+  const handleLogout = () => {
+    authService.logout();
+    setIsAuthenticated(false);
+    setEmailStats(null);
   };
   
   const handleSubmitText = (e) => {
@@ -59,7 +74,12 @@ function Home() {
       <div className="container-center py-8">
         <h1 className="text-3xl font-bold mb-6">InboxPal</h1>
         
-        {!isAuthenticated ? (
+        {isLoading ? (
+          <div className="p-6 border border-gray-200 rounded-lg shadow-sm text-center">
+            <p className="mb-4">Loading...</p>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent mx-auto"></div>
+          </div>
+        ) : !isAuthenticated ? (
           <div className="p-6 border border-gray-200 rounded-lg shadow-sm text-center">
             <p className="mb-4">Connect your Gmail account to get started</p>
             <button 
@@ -71,26 +91,40 @@ function Home() {
           </div>
         ) : (
           <div className="p-6 border border-gray-200 rounded-lg shadow-sm">
-            <div className="mb-4">
-              <p className="text-secondary">
-                Your voice email assistant
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
-                Speak or type your commands
-              </p>
-              
-              {emailStats && (
-                <div className="mt-2 p-2 bg-blue-50 rounded-md">
-                  <p className="text-sm text-blue-800">
-                    You have {emailStats.count} unread emails
-                  </p>
-                </div>
-              )}
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <p className="text-secondary">
+                  Your voice email assistant
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Speak or type your commands
+                </p>
+              </div>
+              <button 
+                onClick={handleLogout}
+                className="text-sm text-red-600 hover:underline"
+              >
+                Logout
+              </button>
             </div>
             
             {error && (
               <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-md">
                 {error}
+              </div>
+            )}
+            
+            {emailStats && (
+              <div className="mt-2 p-2 bg-blue-50 rounded-md">
+                <p className="text-sm text-blue-800">
+                  You have {emailStats.count} unread emails
+                </p>
+              </div>
+            )}
+            
+            {recordingError && (
+              <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-md">
+                {recordingError}
               </div>
             )}
             
@@ -154,25 +188,39 @@ function AuthSuccess() {
   const location = useLocation();
   const navigate = useNavigate();
   const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
   
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const token = params.get('token');
-    
-    if (token) {
-      try {
-        // Store the token
-        authService.setTokenFromUrl(token);
-        
-        // Redirect to home
-        navigate('/');
-      } catch (err) {
-        setError('Failed to process authentication');
-        console.error(err);
+    const processAuth = async () => {
+      const params = new URLSearchParams(location.search);
+      const token = params.get('token');
+      
+      if (token) {
+        try {
+          // Store the token and get credentials
+          const success = await authService.setTokenFromUrl(token);
+          
+          if (success) {
+            // Navigate to home after a short delay
+            setTimeout(() => {
+              navigate('/');
+            }, 1500);
+          } else {
+            setError('Failed to set credentials');
+          }
+        } catch (err) {
+          setError(`Failed to process authentication: ${err.message}`);
+          console.error(err);
+        } finally {
+          setIsLoading(false);
+        }
+      } else {
+        setError('No token received');
+        setIsLoading(false);
       }
-    } else {
-      setError('No token received');
-    }
+    };
+    
+    processAuth();
   }, [location, navigate]);
   
   return (
@@ -189,7 +237,14 @@ function AuthSuccess() {
             </button>
           </>
         ) : (
-          <p>Authenticating... Please wait.</p>
+          <>
+            <p>Authentication successful! Redirecting...</p>
+            {isLoading && (
+              <div className="mt-4">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent mx-auto"></div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

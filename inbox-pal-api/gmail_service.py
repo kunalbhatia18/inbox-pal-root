@@ -6,6 +6,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from fastapi import HTTPException
 import logging
+from google.auth.transport.requests import Request
 
 logger = logging.getLogger(__name__)
 
@@ -81,24 +82,69 @@ def build_gmail_service(credentials_dict):
         logger.error(f"Error building Gmail service: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error accessing Gmail API: {str(e)}")
 
+def build_gmail_service_with_token(token, refresh_token=None):
+    """Build a Gmail service with token and handle refresh if needed."""
+    try:
+        # Get credentials from file
+        with open('oauth_credentials.json', 'r') as f:
+            creds_data = json.load(f)
+        
+        # Create credentials object
+        credentials = Credentials(
+            token=token,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=creds_data['web']['client_id'],
+            client_secret=creds_data['web']['client_secret'],
+            scopes=SCOPES
+        )
+        
+        # Check if token is expired and refresh if possible
+        if credentials.expired and credentials.refresh_token:
+            logger.info("Token expired, attempting to refresh...")
+            credentials.refresh(Request())
+            logger.info("Token refreshed successfully")
+            # Return new token along with the service
+            return build('gmail', 'v1', credentials=credentials), credentials.token
+        elif credentials.expired and not credentials.refresh_token:
+            logger.error("Token expired and no refresh token available")
+            raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
+        
+        logger.info(f"Building Gmail service with token starting with: {token[:10]}...")
+        service = build('gmail', 'v1', credentials=credentials)
+        return service, token  # Return current token if no refresh was needed
+        
+    except Exception as e:
+        logger.error(f"Error building Gmail service with token: {str(e)}")
+        if "invalid_grant" in str(e) or "Token has been expired" in str(e):
+            raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
+        raise HTTPException(status_code=500, detail=f"Error accessing Gmail API: {str(e)}")
+
 def get_unread_count(service):
     """Get the count of unread emails."""
     try:
+        # For metadata scope, we need to retrieve all messages and filter for UNREAD label
         results = service.users().messages().list(
             userId='me',
-            q='is:unread'
+            labelIds=['UNREAD']  # Use labelIds instead of q parameter
         ).execute()
         
+        count = results.get('resultSizeEstimate', 0)
+        logger.info(f"Successfully retrieved unread count: {count}")
+        
         return {
-            'count': results.get('resultSizeEstimate', 0)
+            'count': count
         }
     except Exception as e:
         logger.error(f"Error getting unread count: {str(e)}")
+        if "invalid_grant" in str(e) or "Token has been expired" in str(e):
+            raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
         raise HTTPException(status_code=500, detail=f"Error fetching unread emails: {str(e)}")
 
 def get_recent_emails(service, max_results=5):
     """Get recent emails with basic metadata."""
     try:
+        # First get list of messages (without using q parameter)
         results = service.users().messages().list(
             userId='me',
             maxResults=max_results
@@ -115,6 +161,9 @@ def get_recent_emails(service, max_results=5):
                 metadataHeaders=['From', 'Subject', 'Date']
             ).execute()
             
+            # Check if 'UNREAD' is in the labelIds
+            is_unread = 'UNREAD' in msg.get('labelIds', [])
+            
             headers = msg['payload']['headers']
             email_data = {
                 'id': msg['id'],
@@ -122,12 +171,15 @@ def get_recent_emails(service, max_results=5):
                 'from': next((h['value'] for h in headers if h['name'] == 'From'), ''),
                 'subject': next((h['value'] for h in headers if h['name'] == 'Subject'), ''),
                 'date': next((h['value'] for h in headers if h['name'] == 'Date'), ''),
-                'unread': 'UNREAD' in msg.get('labelIds', [])
+                'unread': is_unread
             }
             
             email_list.append(email_data)
         
+        logger.info(f"Successfully retrieved {len(email_list)} recent emails")
         return email_list
     except Exception as e:
         logger.error(f"Error getting recent emails: {str(e)}")
+        if "invalid_grant" in str(e) or "Token has been expired" in str(e):
+            raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
         raise HTTPException(status_code=500, detail=f"Error fetching recent emails: {str(e)}")

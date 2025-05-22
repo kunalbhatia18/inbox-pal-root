@@ -32,25 +32,39 @@ const authService = {
   },
   
   // Store token from URL
-  setTokenFromUrl: (token) => {
+  setTokenFromUrl: async (token) => {
     localStorage.setItem(TOKEN_KEY, token);
     
-    // Also store as credentials (simplified version for now)
-    const credentials = {
-      token: token,
-      // These would come from a proper token exchange in a real app
-      refresh_token: null,
-      token_uri: "https://oauth2.googleapis.com/token",
-      client_id: "YOUR_CLIENT_ID", // This will be replaced with actual value
-      client_secret: "YOUR_CLIENT_SECRET", // This will be replaced with actual value
-      scopes: [
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/gmail.metadata"
-      ]
-    };
-    
-    authService.setCredentials(credentials);
-    return credentials;
+    try {
+      // Get credential details from backend
+      const response = await fetch('http://localhost:8000/api/auth/credentials');
+      if (!response.ok) {
+        throw new Error(`Error fetching credentials: ${response.status}`);
+      }
+      
+      const credentialData = await response.json();
+      console.log("Received credential data:", credentialData);
+      
+      // Create proper credentials object
+      const credentials = {
+        token,
+        refresh_token: null, // We don't have this in the simple flow
+        token_uri: "https://oauth2.googleapis.com/token",
+        client_id: credentialData.client_id,
+        client_secret: credentialData.client_secret,
+        scopes: [
+          "https://www.googleapis.com/auth/gmail.readonly",
+          "https://www.googleapis.com/auth/gmail.metadata"
+        ]
+      };
+      
+      console.log("Setting credentials:", credentials);
+      authService.setCredentials(credentials);
+      return true;
+    } catch (error) {
+      console.error("Error setting credentials:", error);
+      return false;
+    }
   },
   
   // Check if user is logged in

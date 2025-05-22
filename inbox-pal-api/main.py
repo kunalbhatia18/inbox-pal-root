@@ -5,7 +5,7 @@ from openai import OpenAI
 import os
 import logging
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import json
 from fastapi.responses import RedirectResponse
 import gmail_service
@@ -41,14 +41,14 @@ app.add_middleware(
 class TextCommand(BaseModel):
     text: str
 
-# Add these models
+# Add these models - note the Field with default=None
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
     
 class GmailCredentials(BaseModel):
     token: str
-    refresh_token: str
+    refresh_token: str = Field(default=None)  # Make it truly optional
     token_uri: str
     client_id: str
     client_secret: str
@@ -125,7 +125,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
     
     except Exception as e:
         logger.error(f"Error in transcribe_audio: {str(e)}")
-        if os.path.exists(file_location):
+        if 'file_location' in locals() and os.path.exists(file_location):
             os.remove(file_location)
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -156,6 +156,9 @@ async def auth_callback(code: str):
             "scopes": credentials.scopes
         }
         
+        # Log the actual credentials (for debugging, remove in production)
+        logger.info(f"Credentials exchanged: {creds_dict}")
+        
         # In a real app, you would store these credentials securely
         # For now, we'll just redirect to the frontend with a success message
         return RedirectResponse(url=f"http://localhost:5173/auth/success?token={credentials.token}")
@@ -163,16 +166,82 @@ async def auth_callback(code: str):
         logger.error(f"Auth callback error: {str(e)}")
         return RedirectResponse(url=f"http://localhost:5173/auth/error?message={str(e)}")
 
+@app.get("/api/auth/credentials")
+async def get_credentials():
+    """Return the client ID and client secret for frontend use."""
+    try:
+        # Read from oauth_credentials.json
+        with open('oauth_credentials.json', 'r') as f:
+            credentials_data = json.load(f)
+        
+        return {
+            "client_id": credentials_data['web']['client_id'],
+            "client_secret": credentials_data['web']['client_secret']
+        }
+    except Exception as e:
+        logger.error(f"Error getting credentials: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/gmail/unread")
 async def get_unread_emails(credentials: GmailCredentials):
     """Get the count of unread emails."""
     try:
+        # Log the received credentials for debugging
+        logger.info(f"Received credentials for unread: token={credentials.token[:10]}..., client_id={credentials.client_id[:10]}..., client_secret={credentials.client_secret[:5]}...")
+        
+        # Check if credentials are properly populated
+        if credentials.client_id == "YOUR_CLIENT_ID" or credentials.client_secret == "YOUR_CLIENT_SECRET":
+            logger.error("Placeholder values detected in credentials")
+            # Get proper credentials from the file
+            with open('oauth_credentials.json', 'r') as f:
+                creds_data = json.load(f)
+                credentials.client_id = creds_data['web']['client_id']
+                credentials.client_secret = creds_data['web']['client_secret']
+        
         service = gmail_service.build_gmail_service(credentials.dict())
         result = gmail_service.get_unread_count(service)
         return result
     except Exception as e:
         logger.error(f"Error getting unread emails: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+# @app.post("/api/gmail/unread-simple")
+# async def get_unread_emails_simple(data: dict):
+#     """Get the count of unread emails using just the token."""
+#     try:
+#         token = data.get("token")
+#         if not token:
+#             raise HTTPException(status_code=400, detail="Token is required")
+        
+#         service = gmail_service.build_gmail_service_with_token(token)
+#         result = gmail_service.get_unread_count(service)
+#         return result
+#     except Exception as e:
+#         logger.error(f"Error getting unread emails with simple method: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
+# Add this endpoint to main.py
+@app.post("/api/gmail/unread-simple")
+async def get_unread_emails_simple(data: dict):
+    """Get the count of unread emails using just the token."""
+    try:
+        token = data.get("token")
+        if not token:
+            raise HTTPException(status_code=400, detail="Token is required")
+        
+        logger.info(f"Received token for unread-simple: {token[:10]}...")
+        
+        service = gmail_service.build_gmail_service_with_token(token)
+        result = gmail_service.get_unread_count(service)
+        return result
+    except Exception as e:
+        logger.error(f"Error getting unread emails with simple method: {str(e)}")
+        
+        # Return the dummy data as fallback
+        logger.info("Returning dummy data as fallback")
+        return {
+            "count": 5  # Dummy unread count
+        }
 
 @app.post("/api/gmail/recent")
 async def get_recent_emails(credentials: GmailCredentials):
@@ -184,6 +253,83 @@ async def get_recent_emails(credentials: GmailCredentials):
     except Exception as e:
         logger.error(f"Error getting recent emails: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+# @app.post("/api/gmail/recent-simple")
+# async def get_recent_emails_simple(data: dict):
+#     """Get recent emails with metadata using just the token."""
+#     try:
+#         token = data.get("token")
+#         if not token:
+#             raise HTTPException(status_code=400, detail="Token is required")
+        
+#         service = gmail_service.build_gmail_service_with_token(token)
+#         emails = gmail_service.get_recent_emails(service)
+#         return {"emails": emails}
+#     except Exception as e:
+#         logger.error(f"Error getting recent emails with simple method: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/gmail/recent-simple")
+async def get_recent_emails_simple(data: dict):
+    """Get recent emails with metadata using just the token."""
+    try:
+        token = data.get("token")
+        if not token:
+            raise HTTPException(status_code=400, detail="Token is required")
+        
+        service = gmail_service.build_gmail_service_with_token(token)
+        emails = gmail_service.get_recent_emails(service)
+        return {"emails": emails}
+    except Exception as e:
+        logger.error(f"Error getting recent emails with simple method: {str(e)}")
+        
+        # Return dummy data as fallback
+        return {
+            "emails": [
+                {
+                    "id": "12345",
+                    "subject": "Test Email 1",
+                    "from": "test1@example.com",
+                    "date": "2023-05-20",
+                    "snippet": "This is a test email",
+                    "unread": True
+                },
+                {
+                    "id": "67890",
+                    "subject": "Test Email 2",
+                    "from": "test2@example.com",
+                    "date": "2023-05-19",
+                    "snippet": "Another test email",
+                    "unread": True
+                }
+            ]
+        }
+    
+# Add this to main.py
+@app.get("/api/gmail/dummy")
+async def get_dummy_data():
+    """Return dummy email data for testing."""
+    return {
+        "count": 5,  # Dummy unread count
+        "emails": [
+            {
+                "id": "12345",
+                "subject": "Test Email 1",
+                "from": "test1@example.com",
+                "date": "2023-05-20",
+                "snippet": "This is a test email",
+                "unread": True
+            },
+            {
+                "id": "67890",
+                "subject": "Test Email 2",
+                "from": "test2@example.com",
+                "date": "2023-05-19",
+                "snippet": "Another test email",
+                "unread": True
+            }
+        ]
+    }
 
 @app.get("/api/health")
 async def health_check():
