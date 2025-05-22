@@ -204,21 +204,6 @@ async def get_unread_emails(credentials: GmailCredentials):
     except Exception as e:
         logger.error(f"Error getting unread emails: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-    
-# @app.post("/api/gmail/unread-simple")
-# async def get_unread_emails_simple(data: dict):
-#     """Get the count of unread emails using just the token."""
-#     try:
-#         token = data.get("token")
-#         if not token:
-#             raise HTTPException(status_code=400, detail="Token is required")
-        
-#         service = gmail_service.build_gmail_service_with_token(token)
-#         result = gmail_service.get_unread_count(service)
-#         return result
-#     except Exception as e:
-#         logger.error(f"Error getting unread emails with simple method: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
 
 # Add this endpoint to main.py
 @app.post("/api/gmail/unread-simple")
@@ -226,22 +211,28 @@ async def get_unread_emails_simple(data: dict):
     """Get the count of unread emails using just the token."""
     try:
         token = data.get("token")
+        refresh_token = data.get("refresh_token")  # Optional
+        
         if not token:
             raise HTTPException(status_code=400, detail="Token is required")
         
         logger.info(f"Received token for unread-simple: {token[:10]}...")
         
-        service = gmail_service.build_gmail_service_with_token(token)
+        service, current_token = gmail_service.build_gmail_service_with_token(token, refresh_token)
         result = gmail_service.get_unread_count(service)
-        return result
-    except Exception as e:
-        logger.error(f"Error getting unread emails with simple method: {str(e)}")
         
-        # Return the dummy data as fallback
-        logger.info("Returning dummy data as fallback")
-        return {
-            "count": 5  # Dummy unread count
-        }
+        # If token was refreshed, return the new token
+        if current_token != token:
+            result['new_token'] = current_token
+            logger.info("Token was refreshed, returning new token")
+        
+        return result
+    except HTTPException as http_error:
+        logger.error(f"HTTP Error in unread-simple: {str(http_error)}")
+        raise http_error
+    except Exception as e:
+        logger.error(f"Unexpected error getting unread emails: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching unread emails: {str(e)}")
 
 @app.post("/api/gmail/recent")
 async def get_recent_emails(credentials: GmailCredentials):
@@ -254,82 +245,63 @@ async def get_recent_emails(credentials: GmailCredentials):
         logger.error(f"Error getting recent emails: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
     
-# @app.post("/api/gmail/recent-simple")
-# async def get_recent_emails_simple(data: dict):
-#     """Get recent emails with metadata using just the token."""
-#     try:
-#         token = data.get("token")
-#         if not token:
-#             raise HTTPException(status_code=400, detail="Token is required")
-        
-#         service = gmail_service.build_gmail_service_with_token(token)
-#         emails = gmail_service.get_recent_emails(service)
-#         return {"emails": emails}
-#     except Exception as e:
-#         logger.error(f"Error getting recent emails with simple method: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/gmail/recent-simple")
 async def get_recent_emails_simple(data: dict):
     """Get recent emails with metadata using just the token."""
     try:
         token = data.get("token")
+        refresh_token = data.get("refresh_token")  # Optional
+        
         if not token:
             raise HTTPException(status_code=400, detail="Token is required")
         
-        service = gmail_service.build_gmail_service_with_token(token)
+        service, current_token = gmail_service.build_gmail_service_with_token(token, refresh_token)
         emails = gmail_service.get_recent_emails(service)
-        return {"emails": emails}
-    except Exception as e:
-        logger.error(f"Error getting recent emails with simple method: {str(e)}")
         
-        # Return dummy data as fallback
-        return {
-            "emails": [
-                {
-                    "id": "12345",
-                    "subject": "Test Email 1",
-                    "from": "test1@example.com",
-                    "date": "2023-05-20",
-                    "snippet": "This is a test email",
-                    "unread": True
-                },
-                {
-                    "id": "67890",
-                    "subject": "Test Email 2",
-                    "from": "test2@example.com",
-                    "date": "2023-05-19",
-                    "snippet": "Another test email",
-                    "unread": True
-                }
-            ]
-        }
+        result = {"emails": emails}
+        
+        # If token was refreshed, return the new token
+        if current_token != token:
+            result['new_token'] = current_token
+            logger.info("Token was refreshed, returning new token")
+        
+        return result
+    except HTTPException as http_error:
+        logger.error(f"HTTP Error in recent-simple: {str(http_error)}")
+        raise http_error
+    except Exception as e:
+        logger.error(f"Unexpected error getting recent emails: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching recent emails: {str(e)}")
+
+# Remove the dummy endpoint entirely
+# @app.get("/api/gmail/dummy")  # DELETE THIS ENDPOINT
     
 # Add this to main.py
-@app.get("/api/gmail/dummy")
-async def get_dummy_data():
-    """Return dummy email data for testing."""
-    return {
-        "count": 5,  # Dummy unread count
-        "emails": [
-            {
-                "id": "12345",
-                "subject": "Test Email 1",
-                "from": "test1@example.com",
-                "date": "2023-05-20",
-                "snippet": "This is a test email",
-                "unread": True
-            },
-            {
-                "id": "67890",
-                "subject": "Test Email 2",
-                "from": "test2@example.com",
-                "date": "2023-05-19",
-                "snippet": "Another test email",
-                "unread": True
-            }
-        ]
-    }
+# @app.get("/api/gmail/dummy")
+# async def get_dummy_data():
+#     """Return dummy email data for testing."""
+#     return {
+#         "count": 5,  # Dummy unread count
+#         "emails": [
+#             {
+#                 "id": "12345",
+#                 "subject": "Test Email 1",
+#                 "from": "test1@example.com",
+#                 "date": "2023-05-20",
+#                 "snippet": "This is a test email",
+#                 "unread": True
+#             },
+#             {
+#                 "id": "67890",
+#                 "subject": "Test Email 2",
+#                 "from": "test2@example.com",
+#                 "date": "2023-05-19",
+#                 "snippet": "Another test email",
+#                 "unread": True
+#             }
+#         ]
+#     }
 
 @app.get("/api/health")
 async def health_check():

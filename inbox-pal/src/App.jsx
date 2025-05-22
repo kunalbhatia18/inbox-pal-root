@@ -34,13 +34,21 @@ function Home() {
       
       if (loggedIn) {
         try {
-          // Just fetch the data with the token-based approach
           const unreadData = await gmailService.getUnreadCount();
           setEmailStats(unreadData);
           setIsLoading(false);
         } catch (err) {
           console.error('Error fetching email data:', err);
-          setError(`Failed to load email data: ${err.message}`);
+          
+          // Check if it's a session expiration
+          if (err.message === 'SESSION_EXPIRED') {
+            // Clear auth state and show login screen
+            setIsAuthenticated(false);
+            setEmailStats(null);
+            setError('Your session has expired. Please log in again.');
+          } else {
+            setError(`Failed to load email data: ${err.message}`);
+          }
           setIsLoading(false);
         }
       } else {

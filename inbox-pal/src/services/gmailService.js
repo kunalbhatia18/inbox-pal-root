@@ -20,14 +20,15 @@ const gmailService = {
       });
       
       if (response.status === 401) {
-        // Token expired, clear localStorage and redirect to login
+        // Token expired, clear localStorage and throw error
         console.log('Token expired, clearing auth data');
         authService.logout();
-        window.location.reload(); // This will show the login screen
-        throw new Error('Session expired. Please log in again.');
+        throw new Error('SESSION_EXPIRED');
       }
       
       if (!response.ok) {
+        const errorData = await response.text();
+        console.error(`Server error ${response.status}:`, errorData);
         throw new Error(`Server error: ${response.status}`);
       }
       
@@ -64,14 +65,15 @@ const gmailService = {
       });
       
       if (response.status === 401) {
-        // Token expired, clear localStorage and redirect to login
+        // Token expired, clear localStorage and throw error
         console.log('Token expired, clearing auth data');
         authService.logout();
-        window.location.reload(); // This will show the login screen
-        throw new Error('Session expired. Please log in again.');
+        throw new Error('SESSION_EXPIRED');
       }
       
       if (!response.ok) {
+        const errorData = await response.text();
+        console.error(`Server error ${response.status}:`, errorData);
         throw new Error(`Server error: ${response.status}`);
       }
       
