@@ -7,6 +7,7 @@ from googleapiclient.discovery import build
 from fastapi import HTTPException
 import logging
 from google.auth.transport.requests import Request
+from googleapiclient.errors import HttpError
 
 logger = logging.getLogger(__name__)
 
@@ -65,23 +66,6 @@ def exchange_code_for_token(code):
         logger.error(f"Error exchanging code for token: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Error getting access token: {str(e)}")
 
-def build_gmail_service(credentials_dict):
-    """Build and return a Gmail service object."""
-    try:
-        credentials = Credentials(
-            token=credentials_dict["token"],
-            refresh_token=credentials_dict.get("refresh_token"),
-            token_uri=credentials_dict["token_uri"],
-            client_id=credentials_dict["client_id"],
-            client_secret=credentials_dict["client_secret"],
-            scopes=credentials_dict["scopes"]
-        )
-        
-        return build('gmail', 'v1', credentials=credentials)
-    except Exception as e:
-        logger.error(f"Error building Gmail service: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error accessing Gmail API: {str(e)}")
-
 def build_gmail_service_with_token(token, refresh_token=None):
     """Build a Gmail service with token and handle refresh if needed."""
     try:
@@ -113,12 +97,19 @@ def build_gmail_service_with_token(token, refresh_token=None):
         service = build('gmail', 'v1', credentials=credentials)
         return service, token
         
+    except HttpError as http_error:
+        if http_error.resp.status in [401, 403]:
+            logger.error(f"Gmail API authentication error: {str(http_error)}")
+            raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
+        else:
+            logger.error(f"Gmail API error: {str(http_error)}")
+            raise HTTPException(status_code=500, detail=f"Gmail API error: {str(http_error)}")
     except Exception as e:
         logger.error(f"Error building Gmail service with token: {str(e)}")
-        if "invalid_grant" in str(e) or "Token has been expired" in str(e) or "invalid_token" in str(e):
+        if any(phrase in str(e).lower() for phrase in ["invalid_grant", "token has been expired", "invalid_token"]):
             raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
         raise HTTPException(status_code=500, detail=f"Error accessing Gmail API: {str(e)}")
-    
+
 def get_unread_count(service):
     """Get the count of unread emails."""
     try:
@@ -133,16 +124,22 @@ def get_unread_count(service):
         return {
             'count': count
         }
+    except HttpError as http_error:
+        if http_error.resp.status in [401, 403]:
+            logger.error(f"Gmail API authentication error in get_unread_count: {str(http_error)}")
+            raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
+        else:
+            logger.error(f"Gmail API error in get_unread_count: {str(http_error)}")
+            raise HTTPException(status_code=500, detail=f"Gmail API error: {str(http_error)}")
     except Exception as e:
         logger.error(f"Error getting unread count: {str(e)}")
-        if "invalid_grant" in str(e) or "Token has been expired" in str(e) or "invalid_token" in str(e):
+        if any(phrase in str(e).lower() for phrase in ["invalid_grant", "token has been expired", "invalid_token"]):
             raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
         raise HTTPException(status_code=500, detail=f"Error fetching unread emails: {str(e)}")
 
 def get_recent_emails(service, max_results=5):
     """Get recent emails with basic metadata."""
     try:
-        # First get list of messages (without using q parameter)
         results = service.users().messages().list(
             userId='me',
             maxResults=max_results
@@ -159,7 +156,6 @@ def get_recent_emails(service, max_results=5):
                 metadataHeaders=['From', 'Subject', 'Date']
             ).execute()
             
-            # Check if 'UNREAD' is in the labelIds
             is_unread = 'UNREAD' in msg.get('labelIds', [])
             
             headers = msg['payload']['headers']
@@ -176,8 +172,15 @@ def get_recent_emails(service, max_results=5):
         
         logger.info(f"Successfully retrieved {len(email_list)} recent emails")
         return email_list
+    except HttpError as http_error:
+        if http_error.resp.status in [401, 403]:
+            logger.error(f"Gmail API authentication error in get_recent_emails: {str(http_error)}")
+            raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
+        else:
+            logger.error(f"Gmail API error in get_recent_emails: {str(http_error)}")
+            raise HTTPException(status_code=500, detail=f"Gmail API error: {str(http_error)}")
     except Exception as e:
         logger.error(f"Error getting recent emails: {str(e)}")
-        if "invalid_grant" in str(e) or "Token has been expired" in str(e):
+        if any(phrase in str(e).lower() for phrase in ["invalid_grant", "token has been expired", "invalid_token"]):
             raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
         raise HTTPException(status_code=500, detail=f"Error fetching recent emails: {str(e)}")

@@ -10,7 +10,6 @@ import json
 from fastapi.responses import RedirectResponse
 import gmail_service
 
-
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,14 +40,13 @@ app.add_middleware(
 class TextCommand(BaseModel):
     text: str
 
-# Add these models - note the Field with default=None
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
     
 class GmailCredentials(BaseModel):
     token: str
-    refresh_token: str = Field(default=None)  # Make it truly optional
+    refresh_token: str = Field(default=None)
     token_uri: str
     client_id: str
     client_secret: str
@@ -58,13 +56,7 @@ class GmailCredentials(BaseModel):
 async def process_text(command: TextCommand):
     try:
         logger.info(f"Received text command: {command.text}")
-        
-        # Here we would process the command
-        # For now, just return the text as-is
-        # Later this will be integrated with Gmail commands
-        
         return {"transcript": command.text}
-    
     except Exception as e:
         logger.error(f"Error processing text command: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -74,7 +66,6 @@ async def transcribe_audio(file: UploadFile = File(...)):
     try:
         logger.info(f"Received file: {file.filename}, content_type: {file.content_type}")
         
-        # Check file size first
         content = await file.read()
         if len(content) == 0:
             logger.error("Received empty file")
@@ -82,10 +73,8 @@ async def transcribe_audio(file: UploadFile = File(...)):
         
         logger.info(f"File size: {len(content)} bytes")
         
-        # Determine file extension based on content type or filename
         file_ext = os.path.splitext(file.filename)[1].lower()
         if not file_ext:
-            # Try to get extension from content type
             if 'webm' in file.content_type:
                 file_ext = '.webm'
             elif 'mp3' in file.content_type:
@@ -95,15 +84,13 @@ async def transcribe_audio(file: UploadFile = File(...)):
             elif 'ogg' in file.content_type:
                 file_ext = '.ogg'
             else:
-                file_ext = '.webm'  # Default to webm
+                file_ext = '.webm'
         
-        # Save the uploaded file temporarily with proper extension
         file_location = f"temp_recording{file_ext}"
         with open(file_location, "wb") as f:
             f.write(content)
             logger.info(f"Saved file to {file_location}, size: {len(content)} bytes")
         
-        # Transcribe with Whisper API
         try:
             with open(file_location, "rb") as f:
                 logger.info(f"Sending file to Whisper API with extension: {file_ext}")
@@ -116,7 +103,6 @@ async def transcribe_audio(file: UploadFile = File(...)):
             logger.error(f"Whisper API error: {str(whisper_error)}")
             raise whisper_error
         finally:
-            # Clean up the temporary file
             if os.path.exists(file_location):
                 os.remove(file_location)
                 logger.info(f"Deleted temporary file {file_location}")
@@ -128,8 +114,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
         if 'file_location' in locals() and os.path.exists(file_location):
             os.remove(file_location)
         raise HTTPException(status_code=500, detail=str(e))
-    
-# Add these routes after your existing routes
+
 @app.get("/api/auth/login")
 async def login():
     """Start the OAuth process by redirecting to Google's auth page."""
@@ -146,7 +131,6 @@ async def auth_callback(code: str):
     try:
         credentials = gmail_service.exchange_code_for_token(code)
         
-        # Convert credentials to dict for storage
         creds_dict = {
             "token": credentials.token,
             "refresh_token": credentials.refresh_token,
@@ -156,11 +140,8 @@ async def auth_callback(code: str):
             "scopes": credentials.scopes
         }
         
-        # Log the actual credentials (for debugging, remove in production)
-        logger.info(f"Credentials exchanged: {creds_dict}")
+        logger.info(f"Credentials exchanged: token={credentials.token[:10]}...")
         
-        # In a real app, you would store these credentials securely
-        # For now, we'll just redirect to the frontend with a success message
         return RedirectResponse(url=f"http://localhost:5173/auth/success?token={credentials.token}")
     except Exception as e:
         logger.error(f"Auth callback error: {str(e)}")
@@ -170,7 +151,6 @@ async def auth_callback(code: str):
 async def get_credentials():
     """Return the client ID and client secret for frontend use."""
     try:
-        # Read from oauth_credentials.json
         with open('oauth_credentials.json', 'r') as f:
             credentials_data = json.load(f)
         
@@ -182,36 +162,12 @@ async def get_credentials():
         logger.error(f"Error getting credentials: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/gmail/unread")
-async def get_unread_emails(credentials: GmailCredentials):
-    """Get the count of unread emails."""
-    try:
-        # Log the received credentials for debugging
-        logger.info(f"Received credentials for unread: token={credentials.token[:10]}..., client_id={credentials.client_id[:10]}..., client_secret={credentials.client_secret[:5]}...")
-        
-        # Check if credentials are properly populated
-        if credentials.client_id == "YOUR_CLIENT_ID" or credentials.client_secret == "YOUR_CLIENT_SECRET":
-            logger.error("Placeholder values detected in credentials")
-            # Get proper credentials from the file
-            with open('oauth_credentials.json', 'r') as f:
-                creds_data = json.load(f)
-                credentials.client_id = creds_data['web']['client_id']
-                credentials.client_secret = creds_data['web']['client_secret']
-        
-        service = gmail_service.build_gmail_service(credentials.dict())
-        result = gmail_service.get_unread_count(service)
-        return result
-    except Exception as e:
-        logger.error(f"Error getting unread emails: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Add this endpoint to main.py
 @app.post("/api/gmail/unread-simple")
 async def get_unread_emails_simple(data: dict):
     """Get the count of unread emails using just the token."""
     try:
         token = data.get("token")
-        refresh_token = data.get("refresh_token")  # Optional
+        refresh_token = data.get("refresh_token")
         
         if not token:
             raise HTTPException(status_code=400, detail="Token is required")
@@ -221,7 +177,6 @@ async def get_unread_emails_simple(data: dict):
         service, current_token = gmail_service.build_gmail_service_with_token(token, refresh_token)
         result = gmail_service.get_unread_count(service)
         
-        # If token was refreshed, return the new token
         if current_token != token:
             result['new_token'] = current_token
             logger.info("Token was refreshed, returning new token")
@@ -234,24 +189,12 @@ async def get_unread_emails_simple(data: dict):
         logger.error(f"Unexpected error getting unread emails: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching unread emails: {str(e)}")
 
-@app.post("/api/gmail/recent")
-async def get_recent_emails(credentials: GmailCredentials):
-    """Get recent emails with metadata."""
-    try:
-        service = gmail_service.build_gmail_service(credentials.dict())
-        emails = gmail_service.get_recent_emails(service)
-        return {"emails": emails}
-    except Exception as e:
-        logger.error(f"Error getting recent emails: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-    
-
 @app.post("/api/gmail/recent-simple")
 async def get_recent_emails_simple(data: dict):
     """Get recent emails with metadata using just the token."""
     try:
         token = data.get("token")
-        refresh_token = data.get("refresh_token")  # Optional
+        refresh_token = data.get("refresh_token")
         
         if not token:
             raise HTTPException(status_code=400, detail="Token is required")
@@ -261,7 +204,6 @@ async def get_recent_emails_simple(data: dict):
         
         result = {"emails": emails}
         
-        # If token was refreshed, return the new token
         if current_token != token:
             result['new_token'] = current_token
             logger.info("Token was refreshed, returning new token")
@@ -273,35 +215,6 @@ async def get_recent_emails_simple(data: dict):
     except Exception as e:
         logger.error(f"Unexpected error getting recent emails: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching recent emails: {str(e)}")
-
-# Remove the dummy endpoint entirely
-# @app.get("/api/gmail/dummy")  # DELETE THIS ENDPOINT
-    
-# Add this to main.py
-# @app.get("/api/gmail/dummy")
-# async def get_dummy_data():
-#     """Return dummy email data for testing."""
-#     return {
-#         "count": 5,  # Dummy unread count
-#         "emails": [
-#             {
-#                 "id": "12345",
-#                 "subject": "Test Email 1",
-#                 "from": "test1@example.com",
-#                 "date": "2023-05-20",
-#                 "snippet": "This is a test email",
-#                 "unread": True
-#             },
-#             {
-#                 "id": "67890",
-#                 "subject": "Test Email 2",
-#                 "from": "test2@example.com",
-#                 "date": "2023-05-19",
-#                 "snippet": "Another test email",
-#                 "unread": True
-#             }
-#         ]
-#     }
 
 @app.get("/api/health")
 async def health_check():

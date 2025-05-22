@@ -22,38 +22,36 @@ function Home() {
   const [emailStats, setEmailStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const navigate = useNavigate();
   
-  // Check authentication status
-  // Inside the Home component useEffect in App.jsx
   useEffect(() => {
     const checkAuth = async () => {
       setIsLoading(true);
+      setError(null);
+      
       const loggedIn = authService.isLoggedIn();
       setIsAuthenticated(loggedIn);
       
       if (loggedIn) {
         try {
+          console.log('Attempting to fetch email data...');
           const unreadData = await gmailService.getUnreadCount();
+          console.log('Received email data:', unreadData);
           setEmailStats(unreadData);
-          setIsLoading(false);
         } catch (err) {
           console.error('Error fetching email data:', err);
           
-          // Check if it's a session expiration
           if (err.message === 'SESSION_EXPIRED') {
-            // Clear auth state and show login screen
+            console.log('Session expired, clearing auth');
             setIsAuthenticated(false);
             setEmailStats(null);
             setError('Your session has expired. Please log in again.');
           } else {
             setError(`Failed to load email data: ${err.message}`);
           }
-          setIsLoading(false);
         }
-      } else {
-        setIsLoading(false);
       }
+      
+      setIsLoading(false);
     };
     
     checkAuth();
@@ -67,6 +65,7 @@ function Home() {
     authService.logout();
     setIsAuthenticated(false);
     setEmailStats(null);
+    setError(null);
   };
   
   const handleSubmitText = (e) => {
@@ -75,6 +74,27 @@ function Home() {
       processText(inputText);
       setInputText('');
     }
+  };
+  
+  const handleRetry = async () => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const unreadData = await gmailService.getUnreadCount();
+      setEmailStats(unreadData);
+    } catch (err) {
+      console.error('Retry failed:', err);
+      if (err.message === 'SESSION_EXPIRED') {
+        setIsAuthenticated(false);
+        setEmailStats(null);
+        setError('Your session has expired. Please log in again.');
+      } else {
+        setError(`Failed to load email data: ${err.message}`);
+      }
+    }
+    
+    setIsLoading(false);
   };
   
   return (
@@ -118,7 +138,15 @@ function Home() {
             
             {error && (
               <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-md">
-                {error}
+                <p>{error}</p>
+                {error.includes('Failed to load') && (
+                  <button 
+                    onClick={handleRetry}
+                    className="mt-2 text-sm underline"
+                  >
+                    Try again
+                  </button>
+                )}
               </div>
             )}
             
@@ -150,7 +178,6 @@ function Home() {
               )}
             </div>
             
-            {/* Text Input Form */}
             <form onSubmit={handleSubmitText} className="flex gap-2 mb-4">
               <input
                 type="text"
@@ -170,7 +197,6 @@ function Home() {
               </button>
             </form>
             
-            {/* Voice Button */}
             <div className="flex justify-center mt-4">
               <button 
                 className={`btn ${isRecording ? 'bg-red-500' : 'btn-primary hover:opacity-90'} p-4 rounded-full`}
@@ -205,11 +231,9 @@ function AuthSuccess() {
       
       if (token) {
         try {
-          // Store the token and get credentials
           const success = await authService.setTokenFromUrl(token);
           
           if (success) {
-            // Navigate to home after a short delay
             setTimeout(() => {
               navigate('/');
             }, 1500);
@@ -264,7 +288,6 @@ function AuthError() {
   const location = useLocation();
   const navigate = useNavigate();
   
-  // Get error message from URL
   const errorMessage = new URLSearchParams(location.search).get('message') || 'Authentication failed';
   
   return (
