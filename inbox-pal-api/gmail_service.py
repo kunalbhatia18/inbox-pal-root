@@ -181,3 +181,117 @@ def get_recent_emails(service, max_results=5):
         if "invalid_grant" in str(e) or "Token has been expired" in str(e):
             raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
         raise HTTPException(status_code=500, detail=f"Error fetching recent emails: {str(e)}")
+    
+# Add this function to gmail_service.py
+def rank_emails_by_importance(service, max_results=10):
+    """Get emails and rank them by importance using AI."""
+    try:
+        # Get recent emails
+        results = service.users().messages().list(
+            userId='me',
+            maxResults=max_results
+        ).execute()
+        
+        messages = results.get('messages', [])
+        email_list = []
+        
+        for message in messages:
+            msg = service.users().messages().get(
+                userId='me',
+                id=message['id'],
+                format='full'  # Get full content for better analysis
+            ).execute()
+            
+            # Extract email content
+            headers = msg['payload'].get('headers', [])
+            from_email = next((h['value'] for h in headers if h['name'].lower() == 'from'), '')
+            subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), '')
+            date = next((h['value'] for h in headers if h['name'].lower() == 'date'), '')
+            
+            # Get email body
+            body = extract_email_body(msg['payload'])
+            
+            email_data = {
+                'id': msg['id'],
+                'from': from_email,
+                'subject': subject,
+                'date': date,
+                'body': body[:500],  # First 500 chars for analysis
+                'full_body': body,
+                'unread': 'UNREAD' in msg.get('labelIds', []),
+                'importance_score': 0  # Will be set by AI
+            }
+            
+            email_list.append(email_data)
+        
+        # Use AI to rank importance
+        ranked_emails = rank_with_ai(email_list)
+        
+        logger.info(f"Successfully ranked {len(ranked_emails)} emails by importance")
+        return ranked_emails
+        
+    except Exception as e:
+        logger.error(f"Error ranking emails: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error ranking emails: {str(e)}")
+
+def extract_email_body(payload):
+    """Extract text content from email payload."""
+    body = ""
+    
+    if 'parts' in payload:
+        for part in payload['parts']:
+            if part['mimeType'] == 'text/plain':
+                data = part['body']['data']
+                body = base64.urlsafe_b64decode(data).decode('utf-8')
+                break
+    elif payload['mimeType'] == 'text/plain':
+        data = payload['body']['data']
+        body = base64.urlsafe_b64decode(data).decode('utf-8')
+    
+    return body
+
+def rank_with_ai(emails):
+    """Use AI to rank emails by importance."""
+    import openai
+    import os
+    
+    client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    
+    # Create email summaries for AI analysis
+    email_summaries = []
+    for i, email in enumerate(emails):
+        summary = f"Email {i+1}: From: {email['from']}, Subject: {email['subject']}, Preview: {email['body'][:200]}..."
+        email_summaries.append(summary)
+    
+    prompt = f"""Rank these emails from most important (1) to least important based on:
+- Urgency keywords (urgent, asap, deadline, etc.)
+- Sender importance (boss, client, important domains)
+- Subject matter (meetings, deadlines, questions, etc.)
+- Content urgency
+
+Emails:
+{chr(10).join(email_summaries)}
+
+Respond with just the numbers in order of importance (e.g., "3,1,5,2,4"):"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=50,
+            temperature=0
+        )
+        
+        # Parse the ranking
+        ranking_str = response.choices[0].message.content.strip()
+        rankings = [int(x.strip()) - 1 for x in ranking_str.split(',')]
+        
+        # Reorder emails based on AI ranking
+        ranked_emails = [emails[i] for i in rankings if i < len(emails)]
+        
+        return ranked_emails
+        
+    except Exception as e:
+        logger.error(f"Error in AI ranking: {str(e)}")
+        # Fallback: return emails sorted by unread status
+        return sorted(emails, key=lambda x: x['unread'], reverse=True)

@@ -143,8 +143,8 @@ const useAudioRecorder = () => {
     setError(null);
     
     try {
-      // Send text to backend for processing
-      const response = await fetch('http://localhost:8000/api/process-text', {
+      // Send command for processing
+      const response = await fetch('http://localhost:8000/api/process-command', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -157,11 +157,18 @@ const useAudioRecorder = () => {
       }
       
       const data = await response.json();
-      setTranscript(data.transcript);
+      
+      // Handle different intents
+      if (data.intent === 'SUMMARIZE_EMAILS') {
+        setTranscript('Getting your emails and ranking them by importance...');
+        // TODO: Trigger email summarization flow
+      } else {
+        setTranscript(data.response);
+      }
       
     } catch (err) {
-      console.error("Text processing error:", err);
-      setError(`Text processing error: ${err.message}`);
+      console.error("Command processing error:", err);
+      setError(`Command processing error: ${err.message}`);
     } finally {
       setIsProcessing(false);
     }

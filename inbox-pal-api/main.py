@@ -273,35 +273,106 @@ async def get_recent_emails_simple(data: dict):
     except Exception as e:
         logger.error(f"Unexpected error getting recent emails: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching recent emails: {str(e)}")
-
-# Remove the dummy endpoint entirely
-# @app.get("/api/gmail/dummy")  # DELETE THIS ENDPOINT
     
-# Add this to main.py
-# @app.get("/api/gmail/dummy")
-# async def get_dummy_data():
-#     """Return dummy email data for testing."""
-#     return {
-#         "count": 5,  # Dummy unread count
-#         "emails": [
-#             {
-#                 "id": "12345",
-#                 "subject": "Test Email 1",
-#                 "from": "test1@example.com",
-#                 "date": "2023-05-20",
-#                 "snippet": "This is a test email",
-#                 "unread": True
-#             },
-#             {
-#                 "id": "67890",
-#                 "subject": "Test Email 2",
-#                 "from": "test2@example.com",
-#                 "date": "2023-05-19",
-#                 "snippet": "Another test email",
-#                 "unread": True
-#             }
-#         ]
-#     }
+@app.post("/api/process-command")
+async def process_command(command: TextCommand):
+    """Process voice/text commands and route to appropriate handlers."""
+    try:
+        logger.info(f"Processing command: {command.text}")
+        
+        # Use GPT to understand the intent
+        intent_response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": """You are an email assistant. Classify user commands into these categories:
+                    - SUMMARIZE_EMAILS: User wants email summaries (e.g., "summarize my emails", "tell me about my emails")
+                    - NEXT_EMAIL: User wants the next email (e.g., "next", "next email", "continue")
+                    - SKIP_EMAIL: User wants to skip current email (e.g., "skip", "skip this")
+                    - MORE_DETAILS: User wants more details about current email (e.g., "tell me more", "read the full email")
+                    - STOP: User wants to stop (e.g., "stop", "that's enough", "done")
+                    - OTHER: Anything else
+                    
+                    Respond with just the category name, nothing else."""
+                },
+                {"role": "user", "content": command.text}
+            ],
+            max_tokens=10,
+            temperature=0
+        )
+        
+        intent = intent_response.choices[0].message.content.strip()
+        logger.info(f"Detected intent: {intent}")
+        
+        return {
+            "intent": intent,
+            "original_command": command.text,
+            "response": f"I understand you want to: {intent.lower().replace('_', ' ')}"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing command: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/api/gmail/ranked-emails")
+async def get_ranked_emails(data: dict):
+    """Get emails ranked by importance."""
+    try:
+        token = data.get("token")
+        if not token:
+            raise HTTPException(status_code=400, detail="Token is required")
+        
+        service, current_token = gmail_service.build_gmail_service_with_token(token)
+        ranked_emails = gmail_service.rank_emails_by_importance(service)
+        
+        result = {"emails": ranked_emails}
+        if current_token != token:
+            result['new_token'] = current_token
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error getting ranked emails: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/gmail/summarize-email")
+async def summarize_email(data: dict):
+    """Summarize a specific email."""
+    try:
+        email_content = data.get("email_content")
+        if not email_content:
+            raise HTTPException(status_code=400, detail="Email content is required")
+        
+        # Use GPT to summarize the email
+        summary_response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an email assistant. Summarize emails concisely in 2-3 sentences, focusing on key actions needed, important information, and deadlines. Speak naturally as if talking to the user."
+                },
+                {
+                    "role": "user", 
+                    "content": f"Summarize this email:\n\nFrom: {email_content.get('from', '')}\nSubject: {email_content.get('subject', '')}\nContent: {email_content.get('body', '')}"
+                }
+            ],
+            max_tokens=150,
+            temperature=0.3
+        )
+        
+        summary = summary_response.choices[0].message.content.strip()
+        
+        return {
+            "summary": summary,
+            "email_id": email_content.get('id'),
+            "subject": email_content.get('subject')
+        }
+        
+    except Exception as e:
+        logger.error(f"Error summarizing email: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/health")
 async def health_check():
