@@ -104,7 +104,6 @@ def build_gmail_service_with_token(token, refresh_token=None):
             logger.info("Token expired, attempting to refresh...")
             credentials.refresh(Request())
             logger.info("Token refreshed successfully")
-            # Return new token along with the service
             return build('gmail', 'v1', credentials=credentials), credentials.token
         elif credentials.expired and not credentials.refresh_token:
             logger.error("Token expired and no refresh token available")
@@ -112,21 +111,20 @@ def build_gmail_service_with_token(token, refresh_token=None):
         
         logger.info(f"Building Gmail service with token starting with: {token[:10]}...")
         service = build('gmail', 'v1', credentials=credentials)
-        return service, token  # Return current token if no refresh was needed
+        return service, token
         
     except Exception as e:
         logger.error(f"Error building Gmail service with token: {str(e)}")
-        if "invalid_grant" in str(e) or "Token has been expired" in str(e):
+        if "invalid_grant" in str(e) or "Token has been expired" in str(e) or "invalid_token" in str(e):
             raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
         raise HTTPException(status_code=500, detail=f"Error accessing Gmail API: {str(e)}")
-
+    
 def get_unread_count(service):
     """Get the count of unread emails."""
     try:
-        # For metadata scope, we need to retrieve all messages and filter for UNREAD label
         results = service.users().messages().list(
             userId='me',
-            labelIds=['UNREAD']  # Use labelIds instead of q parameter
+            labelIds=['UNREAD']
         ).execute()
         
         count = results.get('resultSizeEstimate', 0)
@@ -137,7 +135,7 @@ def get_unread_count(service):
         }
     except Exception as e:
         logger.error(f"Error getting unread count: {str(e)}")
-        if "invalid_grant" in str(e) or "Token has been expired" in str(e):
+        if "invalid_grant" in str(e) or "Token has been expired" in str(e) or "invalid_token" in str(e):
             raise HTTPException(status_code=401, detail="Token expired. Please re-authenticate.")
         raise HTTPException(status_code=500, detail=f"Error fetching unread emails: {str(e)}")
 
